@@ -1,0 +1,12 @@
+[package]
+name = "crystal-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+crossbeam-channel = "0.5.15"
+flume = "0.11.1"
+noise = "0.9.0"
+tracing = "0.1.41"
+valence = { git = "https://github.com/valence-rs/valence", features = ["advancement", "equipment", "inventory", "network", "player_list", "anvil", "boss_bar", "command", "scoreboard", "weather", "world_border"]}
+# vek = { version = "0.17.1", features = ["repr_simd"] }
