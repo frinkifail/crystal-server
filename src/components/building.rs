@@ -1,30 +1,42 @@
-use valence::{entity::item::{ItemEntityBundle, Stack}, interact_block::InteractBlockEvent, inventory::HeldItem, prelude::*};
+use valence::{entity::{item::{ItemEntityBundle, Stack}, Velocity}, interact_block::InteractBlockEvent, inventory::HeldItem, prelude::*};
 
 pub fn digging(
     mut commands: Commands,
-    clients: Query<&GameMode>,
+    mut clients: Query<(&GameMode, &mut Client)>,
     mut layers: Query<&mut ChunkLayer>,
     mut events: EventReader<DiggingEvent>,
+    entity_layers: Query<&EntityLayerId>
 ) {
     let mut layer = layers.single_mut();
+    // let entity_layer = entity_layers.get();
 
     for event in events.read() {
-        let Ok(game_mode) = clients.get(event.client) else {
+        let Ok((game_mode, mut client)) = clients.get_mut(event.client) else {
             continue;
         };
+
+        let entity_layer = entity_layers.get(event.client);
 
         if (*game_mode == GameMode::Creative && event.state == DiggingState::Start)
             || (*game_mode == GameMode::Survival && event.state == DiggingState::Stop)
         {
-            // layer.block(event.position)
+            let blockkind = layer.block(event.position).expect("digging... nothing??").state.to_kind();
             // block_ids.
             layer.set_block(event.position, BlockState::AIR);
-            if (*game_mode == GameMode::Survival) {
+            if let Ok(entity_layer) = entity_layer && *game_mode == GameMode::Survival {
                 commands.spawn(ItemEntityBundle {
-                    item_stack: todo!()
-                    //     HERE ^^^^^^^
-                    // I don't know how to spawn an according Stack(ItemStack { ... }) based on the block that was broken
+                    layer: *entity_layer,
+                    item_stack: Stack(ItemStack::new(blockkind.to_item_kind(), 1, None)),
+                    position: Position(DVec3::new(
+                        event.position.x as f64 + 0.5,
+                        event.position.y as f64,
+                        event.position.z as f64 + 0.5
+                    )),
+                    velocity: Velocity(Vec3::new(0.0, 1.2, 0.0)),
+                    ..Default::default()
                 });
+            } else if let Err(ref error) = entity_layer {
+                client.send_action_bar_message(format!("failed to spawn item. {}", error).color(Color::RED));
             }
         }
     }

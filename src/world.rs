@@ -171,7 +171,8 @@ pub fn init_clients_world(
 }
 
 // Removes chunks from memory when no players are viewing them
-pub fn remove_unviewed_chunks(mut layers: Query<&mut ChunkLayer>) {
+// TODO: !!! ADD THIS BACK
+pub fn _remove_unviewed_chunks(mut layers: Query<&mut ChunkLayer>) {
     let Ok(mut layer) = layers.get_single_mut() else {
         return;
     };
@@ -633,6 +634,7 @@ fn in_column_optimized(state: &ChunkWorkerState, world_x: f64, y: f64, world_z: 
 
 // --- Noise Helper Functions --- (No significant changes here for this optimization pass)
 
+/*
 fn has_terrain_at(state: &ChunkWorkerState, p: DVec3) -> bool {
     let hilly = lerp(0.1, 1.0, noise01(&state.hilly, p / 400.0)).powi(2);
     let lower = 15.0 + 100.0 * hilly;
@@ -647,7 +649,7 @@ fn has_terrain_at(state: &ChunkWorkerState, p: DVec3) -> bool {
         n < density
     }
 }
-
+*/
 fn lerp(a: f64, b: f64, t: f64) -> f64 {
     a * (1.0 - t) + b * t
 }
