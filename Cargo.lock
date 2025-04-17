@@ -520,6 +520,8 @@ dependencies = [
  "crossbeam-channel",
  "flume",
  "noise",
+ "serde",
+ "serde_json",
  "tracing",
  "valence",
 ]

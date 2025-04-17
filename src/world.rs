@@ -82,8 +82,8 @@ pub fn setup_world(
     });
 
     // Start worker threads
-    // let core_count = thread::available_parallelism().map_or(1, |p| p.get());
-    let core_count = 8;
+    let core_count = thread::available_parallelism().map_or(1, |p| p.get());
+    // let core_count = 1;
     info!("Spawning {} chunk generation worker threads...", core_count);
     for _ in 0..core_count {
         let state_clone = worker_shared_state.clone();
@@ -164,7 +164,7 @@ pub fn init_clients_world(
         );
 
         info!(
-            "[world] {} initialized in world at {:?}",
+            "{} initialized in world at {:?}",
             username.0, SPAWN_POS
         );
     }
@@ -239,20 +239,19 @@ pub fn send_recv_chunks(mut layers: Query<&mut ChunkLayer>, mut state: ResMut<Ga
         if let Some(prio_opt) = state.pending.remove(&pos) {
             if prio_opt.is_none() { // Ensure it was actually sent (priority was None)
                 // Inside the `if prio_opt.is_none()` block:
-                info!("Attempting to insert chunk at {:?}", pos); // Log *before* calling
+                // info!("Attempting to insert chunk at {:?}", pos); // Log *before* calling
                 layer.insert_chunk(pos, chunk);
-                info!("Successfully called insert_chunk for {:?}", pos); // Log *after* calling
+                // info!("Successfully called insert_chunk for {:?}", pos); // Log *after* calling
             } else {
                 // Chunk finished but shouldn't have? Log warning.
                 info!("Received chunk {:?} that still had priority?", pos);
-                println!("THIS IS FUCKING BEING HIT");
                 state.pending.insert(pos, prio_opt); // Put it back? Or just discard?
-                panic!("LITERALLY MAX CONFIRMATION");
+                // panic!("LITERALLY MAX CONFIRMATION");
             }
         } else {
             // Received a chunk that wasn't pending? Should not happen.
             info!("Received unexpected chunk {:?}", pos);
-            panic!("I SWEAR THIS ISNT HIT");
+            // panic!("I SWEAR THIS ISNT HIT");
         }
     }
     // for (pos, chunk) in state.receiver.drain() {
@@ -286,6 +285,7 @@ pub fn send_recv_chunks(mut layers: Query<&mut ChunkLayer>, mut state: ResMut<Ga
 
 // --- Chunk Generation Worker ---
 
+/* old worker
 fn chunk_worker(state: Arc<ChunkWorkerState>) {
     while let Ok(pos) = state.receiver.recv() {
         // Blocking receive
@@ -412,14 +412,231 @@ fn chunk_worker(state: Arc<ChunkWorkerState>) {
     info!("Chunk worker thread shutting down.");
 }
 
-// --- Noise Helper Functions ---
+
+fn chunk_worker(state: Arc<ChunkWorkerState>) {
+    while let Ok(pos) = state.receiver.recv() {
+        let mut chunk = UnloadedChunk::with_height(HEIGHT);
+
+        for z in 0..16 {
+            for x in 0..16 {
+                let world_x = (pos.x * 16) + x as i32;
+                let world_z = (pos.z * 16) + z as i32;
+
+                // Precompute scaled noise inputs
+                let p_col = DVec3::new(world_x as f64, 0.0, world_z as f64); // Base pos
+                let gravel_noise = fbm(&state.gravel, p_col / 10.0, 3, 2.0, 0.5);
+                let gravel_height = 55 - 1 - (gravel_noise * 6.0).floor() as i32;
+
+                let stone_noise = noise01(&state.stone, p_col / 15.0);
+                let mut surface_depth = (stone_noise * 5.0).max(1.0).round() as u32;
+
+                let hilly = lerp(0.1, 1.0, noise01(&state.hilly, p_col / 400.0)).powi(2);
+                let lower = 15.0 + 100.0 * hilly;
+                let upper = lower + 100.0 * hilly;
+
+                let in_column = |y: f64| {
+                    if y <= lower {
+                        true
+                    } else if y >= upper {
+                        false
+                    } else {
+                        let density = 1.0 - lerpstep(lower, upper, y);
+                        let n = fbm(&state.density, DVec3::new(world_x as f64, y, world_z as f64) / 100.0, 4, 2.0, 0.5);
+                        n < density
+                    }
+                };
+
+                let mut in_terrain = false;
+
+                for y in (0..HEIGHT as i32).rev() {
+                    let p_y = y as f64;
+                    let block = if in_column(p_y) {
+                        if !in_terrain {
+                            in_terrain = true;
+                            // Reset surface depth only at first solid block
+                            surface_depth = (stone_noise * 5.0).max(1.0).round() as u32;
+
+                            if y < gravel_height {
+                                BlockState::GRAVEL
+                            } else if y < 55 {
+                                BlockState::DIRT
+                            } else {
+                                BlockState::GRASS_BLOCK
+                            }
+                        } else if surface_depth > 0 {
+                            surface_depth -= 1;
+                            if y < gravel_height {
+                                BlockState::GRAVEL
+                            } else {
+                                BlockState::DIRT
+                            }
+                        } else {
+                            BlockState::STONE
+                        }
+                    } else {
+                        in_terrain = false;
+                        if y < 55 {
+                            BlockState::WATER
+                        } else {
+                            BlockState::AIR
+                        }
+                    };
+
+                    chunk.set_block_state(x, y as u32, z, block);
+
+                    // Decorate if grass block is on top and air above
+                    if y > 1 && block == BlockState::GRASS_BLOCK {
+                        let py = y as u32 + 1;
+                        if py + 1 < HEIGHT {
+                            let density = fbm(&state.grass, p_col + DVec3::new(0.0, y as f64, 0.0) / 5.0, 4, 2.0, 0.7);
+                            if density > 0.55 {
+                                if density > 0.7 {
+                                    let upper = BlockState::TALL_GRASS.set(PropName::Half, PropValue::Upper);
+                                    let lower = BlockState::TALL_GRASS.set(PropName::Half, PropValue::Lower);
+                                    chunk.set_block_state(x, py + 1, z, upper);
+                                    chunk.set_block_state(x, py, z, lower);
+                                } else {
+                                    chunk.set_block_state(x, py, z, BlockState::GRASS);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Err(e) = state.sender.try_send((pos, chunk)) {
+            info!("Failed to send finished chunk {:?}: {}", pos, e);
+        }
+    }
+    info!("Chunk worker thread shutting down.");
+}
+*/
+// /*
+fn chunk_worker(state: Arc<ChunkWorkerState>) {
+    while let Ok(pos) = state.receiver.recv() {
+        let mut chunk = UnloadedChunk::with_height(HEIGHT);
+
+        // Precompute noise values that depend only on x and z
+        let mut gravel_noise_cache = [[0.0; 16]; 16];
+        let mut stone_noise_cache = [[0.0; 16]; 16];
+        for z in 0..16 {
+            let world_z_base = (pos.z * 16) + z as i32;
+            for x in 0..16 {
+                let world_x = (pos.x * 16) + x as i32;
+                let p_col = DVec3::new(world_x as f64, 0.0, world_z_base as f64);
+                gravel_noise_cache[z][x] = fbm(&state.gravel, p_col / 10.0, 3, 2.0, 0.5);
+                stone_noise_cache[z][x] = noise01(&state.stone, p_col / 15.0);
+            }
+        }
+
+        for z in 0..16 {
+            let world_z_base = (pos.z * 16) + z as i32;
+            for x in 0..16 {
+                let world_x = (pos.x * 16) + x as i32;
+                let p_col = DVec3::new(world_x as f64, 0.0, world_z_base as f64);
+
+                let gravel_noise = gravel_noise_cache[z][x];
+                let gravel_height = 55 - 1 - (gravel_noise * 6.0).floor() as i32;
+
+                let stone_noise = stone_noise_cache[z][x];
+                let mut surface_depth = (stone_noise * 5.0).max(1.0).round() as u32;
+
+                let hilly = lerp(0.1, 1.0, noise01(&state.hilly, p_col / 400.0)).powi(2);
+                let lower = 15.0 + 100.0 * hilly;
+                let upper = lower + 100.0 * hilly;
+
+                let mut in_terrain = false;
+                let mut all_air = true; // Assume all air initially
+
+                for y in (0..HEIGHT as i32).rev() {
+                    let p_y = y as f64;
+                    let block = if in_column_optimized(&state, world_x as f64, p_y, world_z_base as f64, lower, upper) {
+                        all_air = false; // Found terrain, so not all air
+                        if !in_terrain {
+                            in_terrain = true;
+                            surface_depth = (stone_noise * 5.0).max(1.0).round() as u32;
+
+                            if y < gravel_height {
+                                BlockState::GRAVEL
+                            } else if y < 55 {
+                                BlockState::DIRT
+                            } else {
+                                BlockState::GRASS_BLOCK
+                            }
+                        } else if surface_depth > 0 {
+                            surface_depth -= 1;
+                            if y < gravel_height {
+                                BlockState::GRAVEL
+                            } else {
+                                BlockState::DIRT
+                            }
+                        } else {
+                            BlockState::STONE
+                        }
+                    } else {
+                        in_terrain = false;
+                        if y < 55 {
+                            BlockState::WATER
+                        } else {
+                            BlockState::AIR
+                        }
+                    };
+
+                    chunk.set_block_state(x as u32, y as u32, z as u32, block);
+
+                    // Decorate if grass block is on top and air above
+                    if y > 1 && block == BlockState::GRASS_BLOCK {
+                        let py = y as u32 + 1;
+                        if py + 1 < HEIGHT {
+                            let density = fbm(&state.grass, DVec3::new(world_x as f64, y as f64, world_z_base as f64) / 5.0, 4, 2.0, 0.7);
+                            if density > 0.55 {
+                                if density > 0.7 {
+                                    let upper = BlockState::TALL_GRASS.set(PropName::Half, PropValue::Upper);
+                                    let lower = BlockState::TALL_GRASS.set(PropName::Half, PropValue::Lower);
+                                    chunk.set_block_state(x as u32, py + 1, z as u32, upper);
+                                    chunk.set_block_state(x as u32, py, z as u32, lower);
+                                } else {
+                                    chunk.set_block_state(x as u32, py, z as u32, BlockState::GRASS);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Early out: If the entire column is air above sea level, we can potentially skip further processing
+                if all_air && lower > 55.0 {
+                    continue;
+                }
+            }
+        }
+
+        if let Err(e) = state.sender.try_send((pos, chunk)) {
+            info!("Failed to send finished chunk {:?}: {}", pos, e);
+        }
+    }
+    info!("Chunk worker thread shutting down.");
+}
+// */
+// Optimized in_column function to take precomputed lower and upper bounds
+fn in_column_optimized(state: &ChunkWorkerState, world_x: f64, y: f64, world_z: f64, lower: f64, upper: f64) -> bool {
+    if y <= lower {
+        true
+    } else if y >= upper {
+        false
+    } else {
+        let density = 1.0 - lerpstep(lower, upper, y);
+        let n = fbm(&state.density, DVec3::new(world_x, y, world_z) / 100.0, 4, 2.0, 0.5);
+        n < density
+    }
+}
+
+// --- Noise Helper Functions --- (No significant changes here for this optimization pass)
 
 fn has_terrain_at(state: &ChunkWorkerState, p: DVec3) -> bool {
     let hilly = lerp(0.1, 1.0, noise01(&state.hilly, p / 400.0)).powi(2);
-
     let lower = 15.0 + 100.0 * hilly;
     let upper = lower + 100.0 * hilly;
-
     if p.y <= lower {
         true
     } else if p.y >= upper {
@@ -427,8 +644,6 @@ fn has_terrain_at(state: &ChunkWorkerState, p: DVec3) -> bool {
     } else {
         let density = 1.0 - lerpstep(lower, upper, p.y);
         let n = fbm(&state.density, p / 100.0, 4, 2.0, 0.5);
-        // info!("N: {} Density: {}", n, density);
-        // p.y < 64.0
         n < density
     }
 }
@@ -446,7 +661,6 @@ fn fbm(noise: &SuperSimplex, p: DVec3, octaves: u32, lacunarity: f64, persistenc
     let mut amp = 1.0;
     let mut amp_sum = 0.0;
     let mut sum = 0.0;
-
     for _ in 0..octaves {
         let n = noise01(noise, p * freq);
         sum += n * amp;
@@ -454,11 +668,9 @@ fn fbm(noise: &SuperSimplex, p: DVec3, octaves: u32, lacunarity: f64, persistenc
         freq *= lacunarity;
         amp *= persistence;
     }
-
     sum / amp_sum // Already scaled to [0, 1]
 }
 
 fn noise01(noise: &SuperSimplex, p: DVec3) -> f64 {
-    // SuperSimplex output is roughly [-1, 1]
     (noise.get(p.to_array()) + 1.0) / 2.0
 }

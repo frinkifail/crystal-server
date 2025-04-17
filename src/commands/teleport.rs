@@ -1,3 +1,4 @@
+use tracing::info;
 use valence::{command::{handler::CommandResultEvent, parsers::{entity_selector::EntitySelectors, EntitySelector, Vec3}}, command_macros::Command, entity::living::LivingEntity, prelude::*, rand::seq::IteratorRandom};
 
 enum TeleportTarget {
@@ -37,6 +38,7 @@ pub fn handle_teleport_command(
     entity_layers: Query<&EntityLayerId>,
     mut positions: Query<&mut Position>,
     usernames: Query<(Entity, &Username)>,
+    entity_names: Query<&EntityKind>,
 ) {
     for event in events.read() {
         let compiled_command = match &event.result {
@@ -105,8 +107,8 @@ pub fn handle_teleport_command(
         };
 
         let (TeleportTarget::Targets(targets), destination) = compiled_command;
-
-        println!("executing teleport command {targets:#?} -> {destination:#?}");
+        let (_, mut client) = clients.get_mut(event.executor).unwrap();
+        info!("executing teleport command {targets:#?} -> {destination:#?}");
         match destination {
             TeleportDestination::Location(location) => {
                 for target in targets {
@@ -114,14 +116,18 @@ pub fn handle_teleport_command(
                     pos.0.x = f64::from(location.x.get(pos.0.x as f32));
                     pos.0.y = f64::from(location.y.get(pos.0.y as f32));
                     pos.0.z = f64::from(location.z.get(pos.0.z as f32));
+                    
+                    client.send_chat_message("[tp] teleported ".color(Color::GOLD) + <std::string::String as Clone>::clone(&usernames.get(target).unwrap_or((target, &Username(entity_names.get(target).unwrap().get().to_string()))).1).color(Color::RED) + " to ".color(Color::GOLD) + pos.0.x.color(Color::RED) + ' ' + pos.0.y.color(Color::RED) + ' ' + pos.0.z.color(Color::RED));
                 }
             }
             TeleportDestination::Target(target) => {
-                let target = target.unwrap();
-                let target_pos = **positions.get(target).unwrap();
+                let teleport_target = target.unwrap();
+                let target_pos = **positions.get(teleport_target).unwrap();
                 for target in targets {
                     let mut position = positions.get_mut(target).unwrap();
                     position.0 = target_pos;
+
+                    client.send_chat_message("[tp] teleported ".color(Color::GOLD) + <std::string::String as Clone>::clone(&usernames.get(teleport_target).unwrap_or((teleport_target, &Username(entity_names.get(teleport_target).unwrap().get().to_string()))).1).color(Color::RED) + " to ".color(Color::GOLD) + <std::string::String as Clone>::clone(&usernames.get(target).unwrap_or((target, &Username(entity_names.get(target).unwrap().get().to_string()))).1).color(Color::RED));
                 }
             }
         }

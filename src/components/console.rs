@@ -1,4 +1,5 @@
 use crossbeam_channel::Receiver;
+use tracing::{error, info};
 use valence::{client::DisconnectClient, command::scopes::CommandScopes, op_level::OpLevel, prelude::*};
 
 use super::core::set_op_status;
@@ -28,14 +29,14 @@ pub fn handle_console_command(
 
         match name {
             "stop" => {
-                println!("[console] Stopping server...");
+                info!("Stopping server...");
                 for client in clients.iter() {
                     commands.add(DisconnectClient { client: client.0, reason: "Server closed".into() });
                 }
                 std::process::exit(0);
             },
             "players" => {
-                println!("[console] Online players: {}", clients.iter().count());
+                info!("Online players: {}", clients.iter().count());
             },
             "op" => {
                 let player_name = args.get(0).unwrap_or(&"");
@@ -45,7 +46,7 @@ pub fn handle_console_command(
                     }
                 }
             },
-            _ => eprintln!("[console] unknown command")
+            _ => error!("unknown command")
         }
     }
 }
