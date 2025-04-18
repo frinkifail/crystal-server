@@ -20,7 +20,8 @@ use crate::components::core::set_op_status; // Import for OP status
 
 // --- Constants ---
 pub const SPAWN_POS: DVec3 = DVec3::new(0.5, 200.0, 0.5); // Centered in block, high up
-const HEIGHT: u32 = 384; // World height
+const HEIGHT: u32 = 192; // World height
+const SEA_LEVEL: f64 = 47.0;
 
 // --- Structs and Types ---
 
@@ -82,8 +83,8 @@ pub fn setup_world(
     });
 
     // Start worker threads
-    let core_count = thread::available_parallelism().map_or(1, |p| p.get());
-    // let core_count = 1;
+    // let core_count = thread::available_parallelism().map_or(1, |p| p.get());
+    let core_count = 7;
     info!("Spawning {} chunk generation worker threads...", core_count);
     for _ in 0..core_count {
         let state_clone = worker_shared_state.clone();
@@ -171,8 +172,8 @@ pub fn init_clients_world(
 }
 
 // Removes chunks from memory when no players are viewing them
-// TODO: !!! ADD THIS BACK
-pub fn _remove_unviewed_chunks(mut layers: Query<&mut ChunkLayer>) {
+// [x] TODO: add this back later (when I fix it)
+pub fn remove_unviewed_chunks(mut layers: Query<&mut ChunkLayer>) {
     let Ok(mut layer) = layers.get_single_mut() else {
         return;
     };
@@ -512,8 +513,7 @@ fn chunk_worker(state: Arc<ChunkWorkerState>) {
     }
     info!("Chunk worker thread shutting down.");
 }
-*/
-// /*
+
 fn chunk_worker(state: Arc<ChunkWorkerState>) {
     while let Ok(pos) = state.receiver.recv() {
         let mut chunk = UnloadedChunk::with_height(HEIGHT);
@@ -577,7 +577,8 @@ fn chunk_worker(state: Arc<ChunkWorkerState>) {
                         }
                     } else {
                         in_terrain = false;
-                        if y < 55 {
+                        
+                        if y < SEA_LEVEL as i32 {
                             BlockState::WATER
                         } else {
                             BlockState::AIR
@@ -606,7 +607,7 @@ fn chunk_worker(state: Arc<ChunkWorkerState>) {
                 }
 
                 // Early out: If the entire column is air above sea level, we can potentially skip further processing
-                if all_air && lower > 55.0 {
+                if all_air && lower > SEA_LEVEL {
                     continue;
                 }
             }
@@ -618,8 +619,129 @@ fn chunk_worker(state: Arc<ChunkWorkerState>) {
     }
     info!("Chunk worker thread shutting down.");
 }
-// */
-// Optimized in_column function to take precomputed lower and upper bounds
+*/
+fn chunk_worker(state: Arc<ChunkWorkerState>) {
+    while let Ok(pos) = state.receiver.recv() {
+        let mut chunk = UnloadedChunk::with_height(HEIGHT);
+
+        // Precompute noise values that depend only on x and z
+        let mut gravel_noise_cache = [[0.0; 16]; 16];
+        let mut stone_noise_cache = [[0.0; 16]; 16];
+        for z in 0..16 {
+            let world_z_base = (pos.z * 16) + z as i32;
+            for x in 0..16 {
+                let world_x = (pos.x * 16) + x as i32;
+                let p_col = DVec3::new(world_x as f64, 0.0, world_z_base as f64);
+                gravel_noise_cache[z][x] = fbm(&state.gravel, p_col / 10.0, 3, 2.0, 0.5);
+                stone_noise_cache[z][x] = noise01(&state.stone, p_col / 15.0);
+            }
+        }
+
+        for z in 0u32..16u32 {
+            let z = z as usize;
+            let world_z_base = (pos.z * 16) + z as i32;
+            
+            for x in 0u32..16u32 {
+                let x = x as usize;
+                let world_x = (pos.x * 16) + x as i32;
+                let p_col = DVec3::new(world_x as f64, 0.0, world_z_base as f64);
+
+                let gravel_noise = gravel_noise_cache[z][x];
+                let gravel_height = 55 - 1 - (gravel_noise * 6.0).floor() as i32;
+
+                let stone_noise = stone_noise_cache[z][x];
+                let mut surface_depth = (stone_noise * 5.0).max(1.0).round() as u32;
+
+                let hilly = lerp(0.1, 1.0, noise01(&state.hilly, p_col / 400.0)).powi(2);
+                let base_terrain_height = SEA_LEVEL as f64; // Start terrain above sea level
+                let lower = base_terrain_height + 15.0 + 100.0 * hilly;
+                let upper = lower + 100.0 * hilly;
+
+                let mut in_terrain = false;
+                let mut all_air = true;
+
+                let x_u32 = x as u32;
+                let z_u32 = z as u32;
+
+                for y in (0..HEIGHT as i32).rev() {
+                    let p_y = y as f64;
+                    let in_terrain_result = in_column_optimized(&state, world_x as f64, p_y, world_z_base as f64, lower, upper);
+                    
+                    if in_terrain_result {
+                        all_air = false;
+                        
+                        if !in_terrain {
+                            in_terrain = true;
+                            let block = if y < gravel_height {
+                                BlockState::GRAVEL
+                            } else if y < 55 {
+                                BlockState::DIRT
+                            } else {
+                                BlockState::GRASS_BLOCK
+                            };
+                            chunk.set_block_state(x_u32, y as u32, z_u32, block);
+                            surface_depth = (stone_noise * 5.0).max(1.0).round() as u32;
+                        } else if surface_depth > 0 {
+                            surface_depth -= 1;
+                            let block = if y < gravel_height {
+                                BlockState::GRAVEL
+                            } else {
+                                BlockState::DIRT
+                            };
+                            chunk.set_block_state(x_u32, y as u32, z_u32, block);
+                        } else {
+                            chunk.set_block_state(x_u32, y as u32, z_u32, BlockState::STONE);
+                        }
+                    } else {
+                        in_terrain = false;
+                        
+                        if y < SEA_LEVEL as i32 {
+                            chunk.set_block_state(x_u32, y as u32, z_u32, BlockState::WATER);
+                        } else {
+                            chunk.set_block_state(x_u32, y as u32, z_u32, BlockState::AIR);
+                        }
+                    }
+
+                    // Generate caves below the terrain but above sea level
+                    // TODO: caves
+                    // if y >= SEA_LEVEL as i32&& y < lower as i32 {
+                    //     let cave_noise = fbm(&state.cave, DVec3::new(world_x as f64, y as f64, world_z_base as f64) / 50.0, 3, 2.0, 0.5);
+                    //     if cave_noise < 0.3 {
+                    //         chunk.set_block_state(x_u32, y as u32, z_u32, BlockState::AIR);
+                    //     }
+                    // }
+
+                    if y > 1 && chunk.block_state(x_u32, y as u32, z_u32) == BlockState::GRASS_BLOCK {
+                        let py = y as u32 + 1;
+                        if py + 1 < HEIGHT {
+                            let density = fbm(&state.grass, DVec3::new(world_x as f64, y as f64, world_z_base as f64) / 5.0, 4, 2.0, 0.7);
+                            if density > 0.55 {
+                                if density > 0.7 {
+                                    let upper = BlockState::TALL_GRASS.set(PropName::Half, PropValue::Upper);
+                                    let lower = BlockState::TALL_GRASS.set(PropName::Half, PropValue::Lower);
+                                    chunk.set_block_state(x_u32, py + 1, z_u32, upper);
+                                    chunk.set_block_state(x_u32, py, z_u32, lower);
+                                } else {
+                                    chunk.set_block_state(x_u32, py, z_u32, BlockState::GRASS);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if all_air && lower > SEA_LEVEL {
+                    continue;
+                }
+            }
+        }
+
+        if let Err(e) = state.sender.try_send((pos, chunk)) {
+            info!("Failed to send finished chunk {:?}: {}", pos, e);
+        }
+    }
+    info!("Chunk worker thread shutting down.");
+}
+
 fn in_column_optimized(state: &ChunkWorkerState, world_x: f64, y: f64, world_z: f64, lower: f64, upper: f64) -> bool {
     if y <= lower {
         true

@@ -10,10 +10,8 @@ use std::{
 // Modules
 mod commands;
 mod components;
-mod world; // Include the new world module
-// mod worldtest;
+mod world;
 
-// Use statements for components and commands needed in main
 use commands::{
     core::{VersionCommand, handle_version_command},
     gamemode::{GamemodeCommand, handle_gamemode_command},
@@ -24,20 +22,16 @@ use components::{
     building::{digging, place_blocks}, chat::chat_message_event, console::{handle_console_command, ConsoleCommandEvent, ConsoleCommandReceiver}, core::ServerVersion
 };
 use crossbeam_channel::{Sender, unbounded}; use tracing::{error, info};
-// Keep for console input
 use valence::{
-    command::{AddCommand, CommandScopeRegistry},
-    prelude::*,
-    rand::seq::SliceRandom,
+    command::{AddCommand, CommandScopeRegistry}, prelude::*, rand::seq::SliceRandom
 };
 
 // Constants
-const VERSION: &str = "Alpha::0.1";
+const VERSION: &str = "Alpha(dev)::0.4 (item)";
 
-// --- Panic Handler (Keep as is) ---
+// --- Panic Handler ---
 fn _crash_handler(info: &PanicHookInfo) {
     error!("[panic] panicked!");
-    // ... (rest of crash handler code remains the same)
     let premessage = [
         "&crystal::CrashLog",
         ">> crystal crash log",
@@ -66,35 +60,15 @@ fn _crash_handler(info: &PanicHookInfo) {
 
 // --- Main Function ---
 fn main() {
-    // Initialize logging (using tracing subscriber is recommended over println)
-    // Example using tracing_subscriber:
     // tracing_subscriber::fmt().init();
-    // Using basic println for now based on original code:
-    info!("Hello! Running {}.", VERSION);
 
-    // panic::set_hook(Box::new(crash_handler));
+    // Hook the panic for a more friendly crash message when in release mode :D
+    #[cfg(not(debug_assertions))]
+    panic::set_hook(Box::new(crash_handler));
 
-    // Console input setup (Keep as is)
+    // Setup console commands
     let (tx, rx) = unbounded();
     start_console_input_thread(tx);
-
-    // App::new()
-    //     .add_plugins(DefaultPlugins)
-    //     .add_systems(Startup, worldtest::setup)
-    //     .add_systems(
-    //         Update,
-    //         (
-    //             (
-    //                 worldtest::init_clients,
-    //                 worldtest::remove_unviewed_chunks,
-    //                 worldtest::update_client_views,
-    //                 worldtest::send_recv_chunks,
-    //             )
-    //                 .chain(),
-    //             despawn_disconnected_clients,
-    //         ),
-    //     )
-    //     .run();
 
     App::new()
         .add_plugins(DefaultPlugins)
@@ -102,20 +76,21 @@ fn main() {
         .add_systems(
             Startup,
             (
-                world::setup_world,  // Use world setup from the world module
-                setup_core_commands, // Keep command scope setup
+                core_server_setup,
+                world::setup_world,
+                setup_core_commands,
             ),
         )
         // -- Update Systems --
         .add_systems(
             Update,
             (
-                // World systems (chained as in the terrain example)
+                // World systems
                 (
-                    world::init_clients_world, // Use world-specific client init
+                    world::init_clients_world,
                     world::update_client_views,
                     world::send_recv_chunks,
-                    // world::remove_unviewed_chunks,
+                    // "remove unviewed chunks" is run later.
                 )
                     .chain(),
                 // Core systems
@@ -134,6 +109,8 @@ fn main() {
                 handle_op_command,
             ),
         )
+        // Must be run in `Last` because viewer_count needs to update first.
+        .add_systems(Last, world::remove_unviewed_chunks)
         // -- Resources --
         .insert_resource(ConsoleCommandReceiver { receiver: rx })
         .insert_resource(ServerVersion(VERSION.into()))
@@ -149,24 +126,28 @@ fn main() {
 
 // --- Core Setup/Handlers in Main ---
 
+fn core_server_setup() {
+    info!("Hello! Running {}.", VERSION);
+}
+
 fn setup_core_commands(mut command_scopes: ResMut<CommandScopeRegistry>) {
-    // Keep command scope linking as is
+    // --- Admin commands ---
     command_scopes.link("crystal.admin", "crystal.command.version");
     command_scopes.link("crystal.admin", "crystal.command.gamemode");
     command_scopes.link("crystal.admin", "crystal.command.teleport");
     command_scopes.link("crystal.admin", "crystal.command.op");
+    // NOTE: Normal commands TBA
 }
 
 fn leave_handler(mut removed_clients: RemovedComponents<Client>) {
-    // Keep leave handler as is
+    // TODO: store player name before getting removed
     for entity in removed_clients.read() {
         info!("Client entity {:?} left the game :(", entity);
     }
 }
 
-// --- Console Input (Keep as is) ---
+// --- Console Input ---
 fn start_console_input_thread(sender: Sender<String>) {
-    // Keep console thread starter as is
     thread::spawn(move || {
         let stdin = io::stdin();
         for line in io::BufRead::lines(stdin.lock()) {
@@ -187,7 +168,6 @@ fn poll_console_commands(
     receiver: Res<ConsoleCommandReceiver>,
     mut writer: EventWriter<ConsoleCommandEvent>,
 ) {
-    // Keep console poller as is
     while let Ok(line) = receiver.receiver.try_recv() {
         writer.send(ConsoleCommandEvent { raw: line });
     }

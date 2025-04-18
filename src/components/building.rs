@@ -7,21 +7,22 @@ pub fn digging(
     mut events: EventReader<DiggingEvent>,
     entity_layers: Query<&EntityLayerId>
 ) {
+    // NOTE: use `layers.get(event.client)` inside [1] when adding other chunk layers
     let mut layer = layers.single_mut();
-    // let entity_layer = entity_layers.get();
 
     for event in events.read() {
         let Ok((game_mode, mut client)) = clients.get_mut(event.client) else {
             continue;
         };
 
+        // [1]
         let entity_layer = entity_layers.get(event.client);
 
         if (*game_mode == GameMode::Creative && event.state == DiggingState::Start)
             || (*game_mode == GameMode::Survival && event.state == DiggingState::Stop)
         {
             let blockkind = layer.block(event.position).expect("digging... nothing??").state.to_kind();
-            // block_ids.
+            
             layer.set_block(event.position, BlockState::AIR);
             if let Ok(entity_layer) = entity_layer && *game_mode == GameMode::Survival {
                 commands.spawn(ItemEntityBundle {
