@@ -1,0 +1,9 @@
+online_mode = false
+# x.x.x.x or blank
+ip = ""
+port = 25570
+incoming_byte_limit = 2097152
+outgoing_byte_limit = 8388608
+max_players = 20
+tps = 20
+compression_threshold = 256

@@ -1,12 +1,16 @@
 use crossbeam_channel::Receiver;
 use tracing::{error, info};
-use valence::{client::DisconnectClient, command::scopes::CommandScopes, op_level::OpLevel, prelude::*};
+use valence::{
+    client::DisconnectClient, command::scopes::CommandScopes, op_level::OpLevel, prelude::*,
+};
+
+use crate::components::core::ServerVersion;
 
 use super::core::set_op_status;
 
 #[derive(Resource)]
 pub struct ConsoleCommandReceiver {
-    pub receiver: Receiver<String>
+    pub receiver: Receiver<String>,
 }
 
 #[derive(Event)]
@@ -18,8 +22,18 @@ pub fn handle_console_command(
     // mut world: ResMut<World>,
     mut commands: Commands,
     mut events: EventReader<ConsoleCommandEvent>,
-    mut clients: Query<(Entity, &mut Client, &mut Username, &mut OpLevel, &mut CommandScopes), With<Client>>
-    // mut clients: Query<&mut Client>,
+    mut exit: EventWriter<AppExit>,
+    mut clients: Query<
+        (
+            Entity,
+            &mut Client,
+            &mut Username,
+            &mut OpLevel,
+            &mut CommandScopes,
+        ),
+        With<Client>,
+    >,
+    version: Res<ServerVersion>,
 ) {
     for event in events.read() {
         let cmd = event.raw.trim();
@@ -31,22 +45,40 @@ pub fn handle_console_command(
             "stop" => {
                 info!("Stopping server...");
                 for client in clients.iter() {
-                    commands.add(DisconnectClient { client: client.0, reason: "Server closed".into() });
+                    commands.add(DisconnectClient {
+                        client: client.0,
+                        reason: "Server closed".into(),
+                    });
                 }
-                std::process::exit(0);
-            },
+                exit.send(AppExit::Success);
+            }
             "players" => {
                 info!("Online players: {}", clients.iter().count());
-            },
+            }
             "op" => {
                 let player_name = args.get(0).unwrap_or(&"");
+                let mut found = false;
                 for (_, mut client, username, mut op_level, mut permissions) in clients.iter_mut() {
                     if username.0 == player_name.to_owned() {
-                        set_op_status(&mut client, &username, &mut op_level, None, &mut permissions);
+                        set_op_status(
+                            &mut client,
+                            &username,
+                            &mut op_level,
+                            4,
+                            &mut permissions,
+                        );
+                        info!("Set {} as operator.", username.0);
+                        found = true;
                     }
                 }
-            },
-            _ => error!("unknown command")
+                if !found {
+                    info!("No player with that name found.");
+                }
+            }
+            "ver" => {
+                info!("{}", version.0);
+            }
+            _ => error!("unknown command"),
         }
     }
 }

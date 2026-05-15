@@ -1,5 +1,14 @@
 use tracing::info;
-use valence::{command::{handler::CommandResultEvent, parsers::{entity_selector::EntitySelectors, EntitySelector, Vec3}}, command_macros::Command, entity::living::LivingEntity, prelude::*, rand::seq::IteratorRandom};
+use valence::{
+    command::{
+        handler::CommandResultEvent,
+        parsers::{EntitySelector, Vec3, entity_selector::EntitySelectors},
+    },
+    command_macros::Command,
+    entity::living::LivingEntity,
+    prelude::*,
+    rand::seq::IteratorRandom,
+};
 
 enum TeleportTarget {
     Targets(Vec<Entity>),
@@ -116,18 +125,73 @@ pub fn handle_teleport_command(
                     pos.0.x = f64::from(location.x.get(pos.0.x as f32));
                     pos.0.y = f64::from(location.y.get(pos.0.y as f32));
                     pos.0.z = f64::from(location.z.get(pos.0.z as f32));
-                    
-                    client.send_chat_message("[tp] teleported ".color(Color::GOLD) + <std::string::String as Clone>::clone(&usernames.get(target).unwrap_or((target, &Username(entity_names.get(target).unwrap().get().to_string()))).1).color(Color::RED) + " to ".color(Color::GOLD) + pos.0.x.color(Color::RED) + ' ' + pos.0.y.color(Color::RED) + ' ' + pos.0.z.color(Color::RED));
+
+                    client.send_chat_message(
+                        "[tp] teleported ".color(Color::GOLD)
+                            + <String as Clone>::clone(
+                                &usernames
+                                    .get(target)
+                                    .unwrap_or((
+                                        target,
+                                        &Username(
+                                            entity_names.get(target).unwrap().get().to_string(),
+                                        ),
+                                    ))
+                                    .1,
+                            )
+                            .color(Color::RED)
+                            + " to ".color(Color::GOLD)
+                            + pos.0.x.color(Color::RED)
+                            + ' '
+                            + pos.0.y.color(Color::RED)
+                            + ' '
+                            + pos.0.z.color(Color::RED),
+                    );
                 }
             }
             TeleportDestination::Target(target) => {
-                let teleport_target = target.unwrap();
-                let target_pos = **positions.get(teleport_target).unwrap();
-                for target in targets {
-                    let mut position = positions.get_mut(target).unwrap();
-                    position.0 = target_pos;
+                if let Some(target) = target {
+                    let teleport_target = target;
+                    let target_pos = **positions.get(teleport_target).unwrap();
+                    for target in targets {
+                        let mut position = positions.get_mut(target).unwrap();
+                        position.0 = target_pos;
 
-                    client.send_chat_message("[tp] teleported ".color(Color::GOLD) + <std::string::String as Clone>::clone(&usernames.get(teleport_target).unwrap_or((teleport_target, &Username(entity_names.get(teleport_target).unwrap().get().to_string()))).1).color(Color::RED) + " to ".color(Color::GOLD) + <std::string::String as Clone>::clone(&usernames.get(target).unwrap_or((target, &Username(entity_names.get(target).unwrap().get().to_string()))).1).color(Color::RED));
+                        client.send_chat_message(
+                            "[tp] teleported ".color(Color::GOLD)
+                                + <String as Clone>::clone(
+                                    &usernames
+                                        .get(teleport_target)
+                                        .unwrap_or((
+                                            teleport_target,
+                                            &Username(
+                                                entity_names
+                                                    .get(teleport_target)
+                                                    .unwrap()
+                                                    .get()
+                                                    .to_string(),
+                                            ),
+                                        ))
+                                        .1,
+                                )
+                                .color(Color::RED)
+                                + " to ".color(Color::GOLD)
+                                + <String as Clone>::clone(
+                                    &usernames
+                                        .get(target)
+                                        .unwrap_or((
+                                            target,
+                                            &Username(
+                                                entity_names.get(target).unwrap().get().to_string(),
+                                            ),
+                                        ))
+                                        .1,
+                                )
+                                .color(Color::RED),
+                        );
+                    }
+                } else {
+                    client.send_chat_message("[tp] no target found".color(Color::RED));
                 }
             }
         }

@@ -1,3 +1,5 @@
 /target
 /world
 .DS_Store
+unused-code.txt
+.idea

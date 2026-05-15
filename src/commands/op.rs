@@ -23,7 +23,7 @@ pub fn handle_op_command(
         match selector {
             None => {
                 let (mut client, username, _, mut oplevel, mut permissions) = clients.get_mut(event.executor).unwrap();
-                set_op_status(&mut client, &username, &mut oplevel, Some(true), &mut permissions);
+                set_op_status(&mut client, &username, &mut oplevel, 4, &mut permissions);
             }
             Some(selector) => match selector {
                 EntitySelector::SimpleSelector(selector) => match selector {
@@ -37,15 +37,18 @@ pub fn handle_op_command(
                             .find(|(_, username, _, ..)| username.0 == *name)
                             .map(|(_, _, target, ..)| target);
 
-                        let client = &mut clients.get_mut(event.executor).unwrap().0;
                         match target {
-                            None => send_message(client, &format!("[op] could not find target: {name}"), Color::RED),
-                            Some(_) => send_message(client, &format!("[op] successfully opped {name}"), Color::GREEN),
+                            None => send_message(&mut clients.get_mut(event.executor).unwrap().0, &format!("[op] could not find target: {name}"), Color::RED),
+                            Some(target) => {
+                                let (mut client, username, _, mut oplevel, mut permissions) = clients.get_mut(target).unwrap();
+                                set_op_status(&mut client, &username, &mut oplevel, 4, &mut permissions);
+                                send_message(&mut client, &format!("[op] successfully opped {name}"), Color::GREEN)
+                            },
                         }
                     }
                     EntitySelectors::AllPlayers => {
                         for (mut client, username, _, mut oplevel, mut permissions) in &mut clients.iter_mut() {
-                            set_op_status(&mut client, &username, &mut oplevel, Some(true), &mut permissions);
+                            set_op_status(&mut client, &username, &mut oplevel, 4, &mut permissions);
                         }
                         let clientexec = &mut clients.get_mut(event.executor).unwrap().0;
                         send_message(clientexec, "[op] successfully opped everyone", Color::GREEN);
